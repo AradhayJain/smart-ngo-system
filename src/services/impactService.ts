@@ -21,7 +21,7 @@ type SessionLikeUser = {
 type NgoExtraFields = {
   address?: string;
   email?: string;
-  contact_number?: string;
+  contact_info?: string;
   bank_details?: string;
   image_url?: string;
   work_area?: string;
@@ -1740,7 +1740,6 @@ export async function getProfileByUserId(userId: string) {
               contact_info: session.email,
               address: "Delhi",
               email: session.email,
-              contact_number: "",
               bank_details: "",
               image_url: "",
               work_area: session.volunteeringDomain,
@@ -1787,7 +1786,6 @@ export async function getProfileByUserId(userId: string) {
           contact_info: ngo.contact_info,
           address: ngo.location,
           email: ngo.contact_info,
-          contact_number: "",
           bank_details: "",
           image_url: "",
           work_area: ngo.details.sector,
@@ -1834,7 +1832,7 @@ export async function getProfileByUserId(userId: string) {
         ...ngoExtras,
         address: ngoExtras.address ?? ngo.data.location ?? null,
         email: ngoExtras.email ?? ngo.data.contact_info ?? null,
-        contact_number: ngoExtras.contact_number ?? null,
+        contact_info: ngoExtras.contact_info ?? ngo.data.contact_info ?? null,
         bank_details: ngoExtras.bank_details ?? null,
         image_url: ngoExtras.image_url ?? null,
         work_area: ngoExtras.work_area ?? ngo.data.sector ?? null,
@@ -1847,10 +1845,9 @@ export async function getProfileByUserId(userId: string) {
           description: null,
           sector: null,
           location: base.data.location,
-          contact_info: base.data.contact_info,
+          contact_info: ngoExtras.contact_info ?? base.data.contact_info ?? null,
           address: ngoExtras.address ?? base.data.location ?? null,
           email: ngoExtras.email ?? base.data.contact_info ?? null,
-          contact_number: ngoExtras.contact_number ?? null,
           bank_details: ngoExtras.bank_details ?? null,
           image_url: ngoExtras.image_url ?? null,
           work_area: ngoExtras.work_area ?? null,
@@ -1878,7 +1875,6 @@ export async function updateNgoProfile(userId: string, patch: {
   contact_info?: string;
   address?: string;
   email?: string;
-  contact_number?: string;
   bank_details?: string;
   image_url?: string;
   work_area?: string;
@@ -1887,7 +1883,7 @@ export async function updateNgoProfile(userId: string, patch: {
   const extraPatch: NgoExtraFields = {
     address: patch.address,
     email: patch.email,
-    contact_number: patch.contact_number,
+    contact_info: patch.contact_info,
     bank_details: patch.bank_details,
     image_url: patch.image_url,
     work_area: patch.work_area,
@@ -1902,14 +1898,13 @@ export async function updateNgoProfile(userId: string, patch: {
     description: patch.description,
     sector: patch.sector,
     location: patch.location,
-    contact_info: patch.email ?? patch.contact_info,
+    contact_info: patch.contact_info ?? patch.email,
   };
 
   const fullPatch = {
     ...stablePatch,
     address: patch.address,
     email: patch.email,
-    contact_number: patch.contact_number,
     bank_details: patch.bank_details,
     image_url: patch.image_url,
     work_area: patch.work_area,
@@ -1936,7 +1931,7 @@ export async function updateNgoProfile(userId: string, patch: {
       .update({
         display_name: patch.ngo_name,
         location: patch.location,
-        contact_info: patch.email ?? patch.contact_info,
+        contact_info: patch.contact_info ?? patch.email,
       })
       .eq("id", userId);
     if (profileError) throw profileError;

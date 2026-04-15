@@ -52,8 +52,7 @@ export default function Profile() {
         description: payload.ngoProfile?.description || "",
         sector: payload.ngoProfile?.sector || "",
         address: payload.ngoProfile?.address || "",
-        email: payload.ngoProfile?.email || payload.profile?.contact_info || "",
-        contact_number: payload.ngoProfile?.contact_number || "",
+        email: payload.ngoProfile?.email || "",
         bank_details: payload.ngoProfile?.bank_details || "",
         image_url: payload.ngoProfile?.image_url || "",
         work_area: payload.ngoProfile?.work_area || "",
@@ -106,7 +105,6 @@ export default function Profile() {
           contact_info: form.contact_info,
           address: form.address,
           email: form.email,
-          contact_number: form.contact_number,
           bank_details: form.bank_details,
           image_url: form.image_url,
           work_area: form.work_area,
@@ -233,7 +231,7 @@ export default function Profile() {
                   <Input value={form.sector || ""} onChange={(e) => setForm((prev) => ({ ...prev, sector: e.target.value }))} placeholder="Sector" />
                   <Input value={form.address || ""} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} placeholder="Address" />
                   <Input value={form.email || ""} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} placeholder="Email" />
-                  <Input value={form.contact_number || ""} onChange={(e) => setForm((prev) => ({ ...prev, contact_number: e.target.value }))} placeholder="Contact number" />
+                  <Input value={form.contact_info || ""} onChange={(e) => setForm((prev) => ({ ...prev, contact_info: e.target.value }))} placeholder="Contact number" />
                   <Input value={form.work_area || ""} onChange={(e) => setForm((prev) => ({ ...prev, work_area: e.target.value }))} placeholder="Work area" />
                   <Textarea className="md:col-span-2" value={form.description || ""} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} placeholder="Description" />
                   <Textarea className="md:col-span-2" value={form.bank_details || ""} onChange={(e) => setForm((prev) => ({ ...prev, bank_details: e.target.value }))} placeholder="Bank details" />

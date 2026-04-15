@@ -180,7 +180,6 @@ export type Database = {
           contact_info: string | null;
           address: string | null;
           email: string | null;
-          contact_number: string | null;
           bank_details: string | null;
           image_url: string | null;
           work_area: string | null;
@@ -198,7 +197,6 @@ export type Database = {
           contact_info?: string | null;
           address?: string | null;
           email?: string | null;
-          contact_number?: string | null;
           bank_details?: string | null;
           image_url?: string | null;
           work_area?: string | null;
@@ -216,7 +214,6 @@ export type Database = {
           contact_info?: string | null;
           address?: string | null;
           email?: string | null;
-          contact_number?: string | null;
           bank_details?: string | null;
           image_url?: string | null;
           work_area?: string | null;

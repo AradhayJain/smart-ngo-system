@@ -81,8 +81,8 @@ export default function AboutNgo() {
           ngo_name: payload.ngoProfile?.ngo_name || user.name || "",
           description: payload.ngoProfile?.description || "",
           address: payload.ngoProfile?.address || payload.ngoProfile?.location || "",
-          email: payload.ngoProfile?.email || payload.ngoProfile?.contact_info || user.email || "",
-          contact_number: payload.ngoProfile?.contact_number || "",
+          email: payload.ngoProfile?.email || user.email || "",
+          contact_info: payload.ngoProfile?.contact_info || "",
           bank_details: payload.ngoProfile?.bank_details || "",
           image_url: payload.ngoProfile?.image_url || "",
           work_area: payload.ngoProfile?.work_area || payload.ngoProfile?.sector || "",
@@ -138,8 +138,7 @@ export default function AboutNgo() {
         address: form.address,
         location: form.address,
         email: form.email,
-        contact_info: form.email,
-        contact_number: form.contact_number,
+        contact_info: form.contact_info,
         bank_details: form.bank_details,
         image_url: form.image_url,
         work_area: form.work_area,
@@ -329,8 +328,8 @@ export default function AboutNgo() {
               <div className="w-full space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contact Number</p>
                 <Input
-                  value={form.contact_number || ""}
-                  onChange={(event) => setForm((prev) => ({ ...prev, contact_number: event.target.value }))}
+                  value={form.contact_info || ""}
+                  onChange={(event) => setForm((prev) => ({ ...prev, contact_info: event.target.value }))}
                   placeholder="Contact number"
                 />
               </div>

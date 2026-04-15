@@ -31,6 +31,7 @@ const individualRegisterSchema = z.object({
 const ngoRegisterSchema = z.object({
   ngoName: z.string().min(3, "NGO name must be at least 3 characters"),
   location: z.string().min(2, "Location is required"),
+  contactNumber: z.string().regex(/^\d{10}$/, "Contact number must be 10 digits"),
   ngoType: z.string().min(1, "Please select NGO type"),
   email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
@@ -94,6 +95,7 @@ export default function RegisterForm({ userType, onSuccess }: RegisterFormProps)
       ? {
           ngoName: "",
           location: "",
+          contactNumber: "",
           ngoType: "",
           email: "",
           password: "",
@@ -122,6 +124,7 @@ export default function RegisterForm({ userType, onSuccess }: RegisterFormProps)
         ? {
             ngoName: "",
             location: "",
+            contactNumber: "",
             ngoType: "",
             email: "",
             password: "",
@@ -162,7 +165,7 @@ export default function RegisterForm({ userType, onSuccess }: RegisterFormProps)
           : (values as IndividualFormValues | SponsorFormValues).name,
         location: values.location,
         contactNumber: userType === "ngo"
-          ? undefined
+          ? (values as NGOFormValues).contactNumber
           : (values as IndividualFormValues | SponsorFormValues).contactNumber,
         ngoType: userType === "ngo" ? (values as NGOFormValues).ngoType : undefined,
         sponsorshipDomains: userType === "sponsor" ? (values as SponsorFormValues).sponsorshipDomains : undefined,
@@ -357,6 +360,25 @@ export default function RegisterForm({ userType, onSuccess }: RegisterFormProps)
                   <FormControl>
                     <Input
                       placeholder="City, State"
+                      {...field}
+                      disabled={isLoading}
+                      className="bg-background"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="contactNumber"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t("auth.contactNumber")}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="9876543210"
                       {...field}
                       disabled={isLoading}
                       className="bg-background"

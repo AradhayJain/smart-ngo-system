@@ -38,13 +38,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const isSupportedUserType = (value: unknown): value is UserType =>
+  value === "individual" || value === "ngo" || value === "sponsor";
+
 const mapToAppUser = (
   authUser: SupabaseUser,
-  profile?: { user_type?: UserType | null; full_name?: string | null },
+  profile?: { user_type?: UserType | null; role?: UserType | null; full_name?: string | null },
 ): User => {
   const metadataUserType = authUser.user_metadata?.user_type as UserType | undefined;
-  const normalizedUserType = profile?.user_type
-    ?? (metadataUserType === "ngo" || metadataUserType === "sponsor" ? metadataUserType : "individual");
+  const profileUserType = profile?.user_type ?? profile?.role ?? null;
+  const normalizedUserType = isSupportedUserType(profileUserType)
+    ? profileUserType
+    : isSupportedUserType(metadataUserType)
+      ? metadataUserType
+      : "individual";
 
   return {
     id: authUser.id,
@@ -93,13 +100,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       updated_at: new Date().toISOString(),
     };
 
-    await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+    const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+    if (error) {
+      throw new Error(`Failed to save profile: ${error.message}`);
+    }
+  };
+
+  const upsertRoleSpecificProfile = async (
+    authUser: SupabaseUser,
+    userType: UserType,
+    details: {
+      full_name?: string;
+      location?: string;
+      contact_number?: string;
+      ngo_type?: string;
+    } = {},
+  ) => {
+    if (userType === "ngo") {
+      const { error } = await supabase.from("ngo_profiles").upsert(
+        {
+          user_id: authUser.id,
+          ngo_name: details.full_name ?? null,
+          sector: details.ngo_type ?? null,
+          location: details.location ?? null,
+          contact_info: details.contact_number ?? authUser.email ?? null,
+          email: authUser.email ?? null,
+        },
+        { onConflict: "user_id" },
+      );
+      if (error) {
+        throw new Error(`Failed to save NGO profile: ${error.message}`);
+      }
+      return;
+    }
+
+    if (userType === "individual") {
+      const { error } = await supabase.from("individual_profiles").upsert(
+        {
+          user_id: authUser.id,
+          full_name: details.full_name ?? null,
+          location: details.location ?? null,
+          contact_info: authUser.email ?? null,
+        },
+        { onConflict: "user_id" },
+      );
+      if (error) {
+        throw new Error(`Failed to save individual profile: ${error.message}`);
+      }
+    }
   };
 
   const getProfile = async (userId: string) => {
     const { data } = await supabase
       .from("profiles")
-      .select("user_type, full_name")
+      .select("user_type, role, full_name")
       .eq("id", userId)
       .maybeSingle();
     return data;
@@ -230,7 +284,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           options: {
             data: {
               user_type: userType,
+              role: userType,
               full_name: name ?? null,
+              display_name: name ?? null,
+              displayName: name ?? null,
             },
           },
         }),
@@ -247,6 +304,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         contact_number: contactNumber,
         ngo_type: ngoType,
         sponsorship_domains: userType === "sponsor" ? (sponsorshipDomains ?? []) : undefined,
+      });
+
+      await upsertRoleSpecificProfile(data.user, userType, {
+        full_name: name,
+        location,
+        contact_number: contactNumber,
+        ngo_type: ngoType,
       });
 
       if (data.session) {

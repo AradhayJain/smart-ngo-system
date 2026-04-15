@@ -17,6 +17,18 @@ const roleOptions = [
   { value: "sponsor", labelKey: "auth.sponsor", icon: Heart },
 ] as const;
 
+const getDefaultRouteByRole = (role: "individual" | "ngo" | "sponsor") => {
+  if (role === "sponsor") return "/sponsor-portal";
+  if (role === "individual") return "/volunteer-portal";
+  return "/dashboard";
+};
+
+const isRoleSpecificRouteAllowed = (route: string, role: "individual" | "ngo" | "sponsor") => {
+  if (route.startsWith("/volunteer-portal")) return role === "individual";
+  if (route.startsWith("/sponsor-portal")) return role === "sponsor";
+  return true;
+};
+
 export default function Auth() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -25,9 +37,12 @@ export default function Auth() {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [userType, setUserType] = useState<"individual" | "ngo" | "sponsor">("individual");
-  const fallbackRoute = userType === "sponsor" ? "/sponsor-portal" : "/dashboard";
-  const returnTo = (location.state as { from?: string } | null)?.from
-    ?? (user?.userType === "sponsor" ? "/sponsor-portal" : fallbackRoute);
+  const effectiveRole = user?.userType ?? userType;
+  const requestedRoute = (location.state as { from?: string } | null)?.from;
+  const defaultRoute = getDefaultRouteByRole(effectiveRole);
+  const returnTo = requestedRoute && isRoleSpecificRouteAllowed(requestedRoute, effectiveRole)
+    ? requestedRoute
+    : defaultRoute;
 
   const handleLoginSuccess = () => {
     navigate(returnTo);
