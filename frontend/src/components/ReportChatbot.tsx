@@ -27,6 +27,7 @@ interface Prediction {
   urgency: "high" | "medium" | "low";
   confidence: "high" | "medium" | "low";
   timeframe: string;
+  resolution?: string;
 }
 
 interface VolunteerBrief {
@@ -131,7 +132,10 @@ export function ReportChatbot() {
   const loadUploadedReports = async () => {
     setIsLoadingUploadedReports(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/documents`);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Must be logged in view reports");
+      
+      const res = await fetch(`${BACKEND_URL}/documents?ngo_user_id=${user.id}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || "Failed to load uploaded reports.");
@@ -165,7 +169,9 @@ export function ReportChatbot() {
     // Fetch initial context block count from persistent ChromaDB
     const checkStats = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/stats`);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const res = await fetch(`${BACKEND_URL}/stats?ngo_user_id=${user.id}`);
         if (res.ok) {
           const data = await res.json();
           setKnowledgeBaseCount(data.knowledgeBaseCount || 0);
@@ -286,11 +292,15 @@ export function ReportChatbot() {
     setIsProcessingFiles(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("You must be logged in to upload documents.");
+
       let chunksAdded = 0;
       for (const file of uploadedFiles) {
         toast.info(`Uploading ${file.name}...`);
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("ngo_user_id", user.id);
 
         const res = await fetch(`${BACKEND_URL}/upload`, {
           method: "POST",
@@ -375,11 +385,13 @@ export function ReportChatbot() {
       saveMessageToSession(currentSessionId, 'user', content);
 
       // Hit Flask Backend with History
+      const { data: { user } } = await supabase.auth.getUser();
       const res = await fetch(`${BACKEND_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           query: content,
+          ngo_user_id: user?.id,
           history: messages.filter(m => m.content !== "Hello! Select a chat from the sidebar or start a new one or just ask something below to start a new chat.") 
         }),
       });
@@ -916,6 +928,12 @@ export function ReportChatbot() {
                               </span>
                             </div>
                             <p className="text-sm text-muted-foreground leading-relaxed">{pred.description}</p>
+                            {pred.resolution && (
+                              <div className="bg-primary/5 p-3 rounded-md border border-primary/10 mt-2 mb-2">
+                                <h5 className="text-xs font-semibold text-primary mb-1">Recommended Resolution Strategy</h5>
+                                <p className="text-xs text-muted-foreground leading-relaxed">{pred.resolution}</p>
+                              </div>
+                            )}
                             <div className="flex items-center gap-3 flex-wrap">
                               <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md">{pred.sector}</span>
                               <span className="text-xs text-muted-foreground">⏳ {pred.timeframe}</span>

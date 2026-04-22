@@ -97,9 +97,14 @@ def health_check():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Returns the current number of chunks embedded in the ChromaDB collection."""
+    """Returns the current number of chunks embedded in the ChromaDB collection for this NGO."""
     try:
-        count = collection.count()
+        ngo_user_id = request.args.get("ngo_user_id")
+        if not ngo_user_id:
+            return jsonify({"error": "ngo_user_id is required"}), 400
+            
+        results = collection.get(where={"ngo_user_id": ngo_user_id}, include=[])
+        count = len(results['ids']) if results and 'ids' in results else 0
         return jsonify({"knowledgeBaseCount": count}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -109,24 +114,29 @@ def get_stats():
 def list_documents():
     """Lists knowledge-base documents grouped by source with chunk counts and previews."""
     try:
-        total_docs = collection.count()
-        if total_docs == 0:
-            return jsonify({"documents": []}), 200
+        ngo_user_id = request.args.get("ngo_user_id")
+        if not ngo_user_id:
+            return jsonify({"error": "ngo_user_id is required"}), 400
 
         try:
             requested_limit = int(request.args.get("limit", 500))
         except (TypeError, ValueError):
             requested_limit = 500
 
-        limit = max(1, min(requested_limit, 1000, total_docs))
+        limit = max(1, min(requested_limit, 1000))
 
         raw = collection.get(
             limit=limit,
+            where={"ngo_user_id": ngo_user_id},
             include=["metadatas", "documents"]
         )
 
         metadatas = raw.get("metadatas") or []
         documents = raw.get("documents") or []
+        total_docs = len(metadatas)
+
+        if total_docs == 0:
+            return jsonify({"documents": [], "scanned_chunks": 0, "total_chunks": 0}), 200
 
         grouped = {}
         for metadata, doc_text in zip(metadatas, documents):
@@ -187,6 +197,8 @@ def upload_file():
     if not text.strip():
         return jsonify({"error": "Extracted text is empty"}), 400
 
+    ngo_user_id = request.form.get("ngo_user_id")
+
     # Chunk and embed
     chunks = chunk_text(text)
     count = 0
@@ -196,15 +208,35 @@ def upload_file():
             emb = get_embedding(c_text)
             if emb:
                 doc_id = f"{filename}_chunk_{i}"
+                metadata = {"source": filename}
+                if ngo_user_id:
+                    metadata["ngo_user_id"] = ngo_user_id
                 collection.add(
                     documents=[c_text],
                     embeddings=[emb],
-                    metadatas=[{"source": filename}],
+                    metadatas=[metadata],
                     ids=[doc_id]
                 )
                 count += 1
     except Exception as e:
         return jsonify({"error": f"Gemini Embedding Error: {str(e)}"}), 500
+
+    # Persist uploaded document to Supabase
+    if supabase and ngo_user_id:
+        try:
+            upload_payload = {
+                "ngo_user_id": ngo_user_id,
+                "source_type": "uploaded_document",
+                "report_title": filename,
+                "report_summary": f"Uploaded document: {filename}",
+                "report_count": 1,
+                "knowledge_chunks": count,
+                "report_data": [{"filename": filename, "text": text}],
+            }
+            supabase.table("chatbot_synced_reports").insert(upload_payload).execute()
+            print(f"Successfully persisted {filename} to Supabase database.")
+        except Exception as e:
+            print(f"Failed to persist uploaded document to Supabase: {e}")
 
     return jsonify({
         "success": True, 
@@ -228,17 +260,24 @@ def sync_history():
         issues_res = supabase.table("issues").select("*").eq("ngo_user_id", user_id).execute()
         issues = issues_res.data or []
 
-        if not issues:
-            return jsonify({"message": "No historical issues found to sync."}), 200
+        # Fetch Run Agent Reports
+        reports_res = supabase.table("run_agent_reports").select("*").eq("ngo_user_id", user_id).execute()
+        run_agent_reports = reports_res.data or []
+
+        if not issues and not run_agent_reports:
+            return jsonify({"message": "No historical data found to sync."}), 200
 
         snapshot_payload = {
             "ngo_user_id": user_id,
             "source_type": "supabase_history",
-            "report_title": build_sync_report_title(len(issues)),
-            "report_summary": f"Synced {len(issues)} issue records from Supabase into the chatbot knowledge base.",
-            "report_count": len(issues),
+            "report_title": build_sync_report_title(len(issues) + len(run_agent_reports)),
+            "report_summary": f"Synced {len(issues)} issues and {len(run_agent_reports)} reports from Supabase into the chatbot knowledge base.",
+            "report_count": len(issues) + len(run_agent_reports),
             "knowledge_chunks": 0,
-            "report_data": issues,
+            "report_data": {
+                "issues": issues,
+                "run_agent_reports": run_agent_reports
+            },
         }
 
         try:
@@ -257,6 +296,27 @@ def sync_history():
             history_text += f"  Urgency Score: {issue.get('urgency_score', 'N/A')}\n"
             history_text += f"  Date: {issue.get('created_at', 'N/A')}\n\n"
             
+        if run_agent_reports:
+            history_text += "NGO Run Agent Pipeline Reports Log:\n\n"
+            for rpt in run_agent_reports:
+                history_text += f"- Report Title: {rpt.get('title', 'N/A')}\n"
+                history_text += f"  Source Type: {rpt.get('source_type', 'N/A')}\n"
+                history_text += f"  Date: {rpt.get('created_at', 'N/A')}\n"
+                
+                pipeline = rpt.get('pipeline_result') or {}
+                if isinstance(pipeline, dict):
+                    alerts = pipeline.get('alerts', [])
+                    extr_issues = pipeline.get('issues', [])
+                    history_text += f"  Alerts Generated: {len(alerts)}\n"
+                    history_text += f"  Issues Extracted: {len(extr_issues)}\n"
+                
+                processed = rpt.get('processed_output') or {}
+                if isinstance(processed, dict):
+                    summary = processed.get('summary', 'N/A')
+                    history_text += f"  Summary: {summary}\n"
+                
+                history_text += "\n"
+            
         # Chunk and embed the database logs
         chunks = chunk_text(history_text, chunk_size=800, overlap=100)
         count = 0
@@ -269,7 +329,7 @@ def sync_history():
                     collection.upsert(
                         documents=[c_text],
                         embeddings=[emb],
-                        metadatas=[{"source": "supabase_history"}],
+                        metadatas=[{"source": "supabase_history", "ngo_user_id": user_id}],
                         ids=[doc_id]
                     )
                     count += 1
@@ -283,7 +343,7 @@ def sync_history():
             except Exception as e:
                 print(f"WARNING: Failed to update synced report chunk count: {e}")
                 
-        return jsonify({"success": True, "message": f"Synced {len(issues)} database records as {count} context chunks and saved a report snapshot."}), 200
+        return jsonify({"success": True, "message": f"Synced {len(issues)} issues and {len(run_agent_reports)} reports as {count} context chunks and saved a report snapshot."}), 200
 
     except Exception as e:
         return jsonify({"error": f"Failed to sync history: {str(e)}"}), 500
@@ -298,20 +358,25 @@ def chat():
     if not query:
         return jsonify({"error": "Query cannot be empty"}), 400
         
+    ngo_user_id = data.get("ngo_user_id")
+    if not ngo_user_id:
+        return jsonify({"error": "ngo_user_id is required"}), 400
+        
     try:
         query_emb = get_embedding(query)
     except Exception as e:
         return jsonify({"error": f"Embedding Error: {str(e)}"}), 500
 
     # Retrieve context — cap n_results to avoid crashing when collection is small
-    total_docs = collection.count()
+    total_docs = collection.count() # This is a global count, it's fine just for limiting n_results loosely
     n_results = min(5, total_docs) if total_docs > 0 else 0
     
     retrieved_docs = []
     if n_results > 0:
         results = collection.query(
             query_embeddings=[query_emb],
-            n_results=n_results
+            n_results=n_results,
+            where={"ngo_user_id": ngo_user_id}
         )
         retrieved_docs = results['documents'][0] if results['documents'] else []
     
@@ -380,6 +445,7 @@ def smart_analysis():
     # --- 1. Pull from Supabase ---
     issues_text = "No historical issues found."
     volunteers_text = "No volunteers found."
+    reports_text = "No run agent reports found."
 
     if supabase:
         try:
@@ -414,21 +480,31 @@ def smart_analysis():
                 volunteers_text = "\n".join(lines)
         except Exception as e:
             print(f"Supabase volunteers fetch error: {e}")
+            
+        try:
+            reports_res = supabase.table("run_agent_reports").select("*").eq("ngo_user_id", ngo_user_id).order('created_at', desc=True).limit(5).execute()
+            r_data = reports_res.data or []
+            if r_data:
+                lines = ["Recent Run Agent Pipeline Reports:"]
+                for rpt in r_data:
+                    lines.append(f"- Title: {rpt.get('title', 'N/A')} | Source: {rpt.get('source_type','N/A')} | Date: {rpt.get('created_at', 'N/A')}")
+                reports_text = "\n".join(lines)
+        except Exception as e:
+            print(f"Supabase run_agent_reports fetch error: {e}")
     else:
         print("WARNING: Supabase not available. Analysis will use report context only.")
 
     # --- 2. Pull uploaded report context from ChromaDB ---
     report_context = "No reports uploaded to knowledge base yet."
     total_docs = collection.count()
-    if total_docs > 0:
-        try:
-            query_emb = get_embedding("issues problems needs resource requirements sector location affected")
-            results = collection.query(query_embeddings=[query_emb], n_results=min(6, total_docs))
-            docs = results['documents'][0] if results['documents'] else []
-            if docs:
-                report_context = "Relevant Excerpts from Uploaded Field Reports:\n\n" + "\n\n---\n\n".join(docs)
-        except Exception as e:
-            print(f"ChromaDB query error: {e}")
+    try:
+        query_emb = get_embedding("issues problems needs resource requirements sector location affected")
+        results = collection.query(query_embeddings=[query_emb], n_results=6, where={"ngo_user_id": ngo_user_id})
+        docs = results['documents'][0] if results['documents'] else []
+        if docs:
+            report_context = "Relevant Excerpts from Uploaded Field Reports:\n\n" + "\n\n---\n\n".join(docs)
+    except Exception as e:
+        print(f"ChromaDB query error: {e}")
 
     # --- 3. Build Gemini Prompt ---
     prompt = f"""You are an expert NGO operations analyst. Based on the data below, perform a comprehensive smart analysis.
@@ -437,6 +513,8 @@ def smart_analysis():
 {issues_text}
 
 {volunteers_text}
+
+{reports_text}
 
 ## UPLOADED REPORT CONTEXT
 {report_context}
@@ -452,7 +530,8 @@ Analyze all the data above and return a JSON object with EXACTLY this structure:
       "sector": "relevant sector",
       "urgency": "high|medium|low",
       "confidence": "high|medium|low",
-      "timeframe": "e.g. next 2 weeks"
+      "timeframe": "e.g. next 2 weeks",
+      "resolution": "Actionable strategy or steps to safely prevent or mitigate this ongoing issue"
     }}
   ],
   "assignments": [
@@ -488,12 +567,13 @@ Analyze all the data above and return a JSON object with EXACTLY this structure:
 
 IMPORTANT:
 - Base assignments ONLY on the volunteers listed above
-- If no volunteers match, set primary_volunteer to null and explain in backup_volunteers why
+- If no active volunteers match or are available with required skills for an issue, YOU MUST set primary_volunteer to exactly null. We will automatically use this to fire a community request!
+- For any prediction, provide a thoroughly actionable resolution strategy.
 - Return ONLY valid JSON. No markdown, no explanation outside the JSON.
 """
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(temperature=0.2)
@@ -506,10 +586,143 @@ IMPORTANT:
                 raw = raw[4:]
         import json
         result = json.loads(raw)
+
+        if supabase:
+            assignments = result.get("assignments", [])
+            for assignment in assignments:
+                pv = assignment.get("primary_volunteer")
+                if pv is None:
+                    try:
+                        urgency_score = int(assignment.get("urgency_score", 5))
+                    except:
+                        urgency_score = 5
+
+                    urg_str = "low"
+                    if urgency_score >= 8: urg_str = "critical"
+                    elif urgency_score >= 6: urg_str = "high"
+                    elif urgency_score >= 4: urg_str = "medium"
+
+                    reason_text = "Skill shortage"
+                    b_vols = assignment.get("backup_volunteers", [])
+                    if b_vols and isinstance(b_vols, list) and isinstance(b_vols[0], dict):
+                        reason_text = b_vols[0].get("reason", reason_text)
+                    
+                    req_payload = {
+                        "owner_id": ngo_user_id,
+                        "title": assignment.get("issue_summary", "Help Needed"),
+                        "description": f"Automated Request: We urgently need volunteers for an ongoing crisis matching this criteria.\\nReason: {reason_text}\\nLocation: {assignment.get('location', 'N/A')}",
+                        "category": assignment.get("sector", "General"),
+                        "urgency": urg_str,
+                        "location": assignment.get("location", "N/A"),
+                        "volunteers_needed": 1,
+                        "funding_amount": 0,
+                        "skills_needed": [assignment.get("sector", "General")],
+                        "contact_method": "Platform Messaging"
+                    }
+                    try:
+                        supabase.table("ngo_requests").insert(req_payload).execute()
+                        print("Automated community post created for missing volunteer.")
+                    except Exception as e:
+                        print(f"Failed to post automated request: {e}")
+
         return jsonify({"success": True, "analysis": result}), 200
     except Exception as e:
         return jsonify({"error": f"Analysis generation failed: {str(e)}"}), 500
 
+
+def rehydrate_chroma():
+    try:
+        total_docs = collection.count()
+        if total_docs > 0:
+            print(f"ChromaDB is already hydrated with {total_docs} documents.")
+            return
+
+        if not supabase:
+            print("Supabase client not initialized. Cannot rehydrate ChromaDB.")
+            return
+
+        print("Local ChromaDB is empty. Rehydrating from Supabase...")
+        res = supabase.table("chatbot_synced_reports").select("*").execute()
+        reports = res.data or []
+        
+        count = 0
+        for report in reports:
+            user_id = report.get("ngo_user_id", "system")
+            source_type = report.get("source_type")
+            
+            if source_type == "supabase_history":
+                raw_data = report.get("report_data", [])
+                if isinstance(raw_data, dict):
+                    issues = raw_data.get("issues", [])
+                    agent_reports = raw_data.get("run_agent_reports", [])
+                else:
+                    issues = raw_data
+                    agent_reports = []
+
+                history_text = "Historical NGO Issues Log:\n\n"
+                for issue in issues:
+                    history_text += f"- Issue: {issue.get('issue_summary', 'N/A')}\n"
+                    history_text += f"  Sector: {issue.get('sector', 'N/A')}\n"
+                    history_text += f"  Location: {issue.get('location', 'N/A')}\n"
+                    history_text += f"  Affected: {issue.get('affected_count', 'N/A')}\n"
+                    history_text += f"  Urgency Score: {issue.get('urgency_score', 'N/A')}\n"
+                    history_text += f"  Date: {issue.get('created_at', 'N/A')}\n\n"
+                
+                if agent_reports:
+                    history_text += "NGO Run Agent Pipeline Reports Log:\n\n"
+                    for rpt in agent_reports:
+                        history_text += f"- Report Title: {rpt.get('title', 'N/A')}\n"
+                        history_text += f"  Source Type: {rpt.get('source_type', 'N/A')}\n"
+                        history_text += f"  Date: {rpt.get('created_at', 'N/A')}\n"
+                        pipeline = rpt.get('pipeline_result') or {}
+                        if isinstance(pipeline, dict):
+                            history_text += f"  Alerts Generated: {len(pipeline.get('alerts', []))}\n"
+                            history_text += f"  Issues Extracted: {len(pipeline.get('issues', []))}\n"
+                        processed = rpt.get('processed_output') or {}
+                        if isinstance(processed, dict):
+                            history_text += f"  Summary: {processed.get('summary', 'N/A')}\n"
+                        history_text += "\n"
+                    
+                chunks = chunk_text(history_text, chunk_size=800, overlap=100)
+                for i, c_text in enumerate(chunks):
+                    emb = get_embedding(c_text)
+                    if emb:
+                        doc_id = f"supabase_sync_{user_id}_{report.get('id', 'r')}_chunk_{i}"
+                        collection.upsert(
+                            documents=[c_text],
+                            embeddings=[emb],
+                            metadatas=[{"source": "supabase_history", "ngo_user_id": user_id}],
+                            ids=[doc_id]
+                        )
+                        count += 1
+                        
+            elif source_type == "uploaded_document":
+                report_data_list = report.get("report_data", [])
+                if report_data_list and isinstance(report_data_list, list):
+                    data = report_data_list[0]
+                    if isinstance(data, dict):
+                        filename = data.get("filename", "unknown")
+                        text = data.get("text", "")
+                        if text:
+                            chunks = chunk_text(text)
+                            for i, c_text in enumerate(chunks):
+                                if not c_text.strip(): continue
+                                emb = get_embedding(c_text)
+                                if emb:
+                                    # Need a unique ID in case same filename uploaded multiple times
+                                    doc_id = f"{filename}_{report.get('id', 'r')}_chunk_{i}"
+                                    collection.upsert(
+                                        documents=[c_text],
+                                        embeddings=[emb],
+                                        metadatas=[{"source": filename, "ngo_user_id": user_id}],
+                                        ids=[doc_id]
+                                    )
+                                    count += 1
+        print(f"Rehydration complete. Restored {count} chunk(s).")
+    except Exception as e:
+        print(f"Failed to rehydrate fallback: {e}")
+
+rehydrate_chroma()
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
