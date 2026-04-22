@@ -16,13 +16,16 @@ app.use(express.json());
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const allowedOrigins = new Set([
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost:4173',
     'http://127.0.0.1:4173',
   ]);
+  const isLocalhostOrigin = typeof origin === 'string' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
-  if (!origin || allowedOrigins.has(origin)) {
+  if (!origin || allowedOrigins.has(origin) || isLocalhostOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
   }
 

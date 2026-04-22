@@ -1,6 +1,10 @@
 export type Language = "en" | "hi";
 
-type TranslationValue = string | Record<string, TranslationValue>;
+interface TranslationTree {
+  [key: string]: TranslationValue;
+}
+
+type TranslationValue = string | TranslationTree;
 
 const translations: Record<Language, Record<string, TranslationValue>> = {
   en: {
@@ -12,15 +16,18 @@ const translations: Record<Language, Record<string, TranslationValue>> = {
     },
     nav: {
       dashboard: "Dashboard",
+      about: "About",
       volunteerPortal: "Volunteer Portal",
       sponsorPortal: "Sponsor Portal",
       runAgents: "Run Agents",
+      ragInsights: "RAG Insights",
       sponsors: "Sponsors",
       issues: "Issues",
       volunteers: "Volunteers",
       actionPlan: "Action Plan",
       agentLogs: "Agent Logs",
       community: "Community Connections",
+      newsPortal: "News Portal",
       saved: "Saved",
       fundSupport: "Fund Support",
       manageFunds: "Manage Funds",
@@ -414,14 +421,18 @@ const translations: Record<Language, Record<string, TranslationValue>> = {
     },
     nav: {
       dashboard: "डैशबोर्ड",
+      about: "परिचय",
       volunteerPortal: "स्वयंसेवक पोर्टल",
       sponsorPortal: "स्पॉन्सर पोर्टल",
       runAgents: "एजेंट चलाएँ",
+      ragInsights: "RAG इनसाइट्स",
+      sponsors: "प्रायोजक",
       issues: "समस्याएँ",
       volunteers: "स्वयंसेवक",
       actionPlan: "कार्य योजना",
       agentLogs: "एजेंट लॉग",
       community: "सामुदायिक संपर्क",
+      newsPortal: "न्यूज़ पोर्टल",
       saved: "सहेजे गए",
       fundSupport: "निधि सहायता",
       manageFunds: "फंड प्रबंधन",

@@ -40,17 +40,16 @@ import {
 
 const ngoNavItems = [
   { labelKey: "nav.dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { labelKey: "About", url: "/about", icon: Building2 },
+  { labelKey: "nav.about", url: "/about", icon: Building2 },
   { labelKey: "nav.sponsors", url: "/sponsors", icon: Handshake },
   { labelKey: "nav.runAgents", url: "/run", icon: Play, accent: true },
-  { labelKey: "RAG Insights", url: "/insights", icon: BrainCircuit, accent: true },
+  { labelKey: "nav.ragInsights", url: "/insights", icon: BrainCircuit, accent: true },
   { labelKey: "nav.manageFunds", url: "/manage-funds", icon: DollarSign },
   { labelKey: "nav.issues", url: "/issues", icon: ListChecks },
   { labelKey: "nav.volunteers", url: "/volunteers", icon: Users },
   { labelKey: "nav.actionPlan", url: "/action-plan", icon: FileText },
   // { labelKey: "nav.agentLogs", url: "/logs", icon: Terminal },
-  // Added to ngoNavItems array
-  {labelKey: "nav.newsPortal", url: "/news", icon: Newspaper, accent: true },
+  { labelKey: "nav.newsPortal", url: "/news", icon: Newspaper, accent: true },
   { labelKey: "nav.community", url: "/community", icon: MessageSquare },
   // { labelKey: "nav.saved", url: "/saved", icon: Bookmark },
 ];

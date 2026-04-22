@@ -7,7 +7,7 @@ import { Loader } from 'lucide-react';
 interface NewsIssue {
   issue_title: string;
   issue_type: string;
-  affected_population: number;
+  // affected_population: number;
   location: string;
   severity: 'low' | 'medium' | 'high';
   source_url: string;
@@ -42,7 +42,11 @@ export default function NewsPortal() {
         })
       });
 
-      if (!response.ok) throw new Error('Search failed');
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        const backendMessage = typeof errorPayload?.error === 'string' ? errorPayload.error : 'Search failed';
+        throw new Error(backendMessage);
+      }
       const data = await response.json();
       const nextResults = Array.isArray(data)
         ? data
@@ -52,11 +56,12 @@ export default function NewsPortal() {
 
       setResults(nextResults);
       if (!nextResults.length) {
-        setError('The backend returned no structured news items for this search.');
+        setError('No matching news was returned. Try a broader query, remove country filter, or switch language to English.');
       }
     } catch (error) {
       console.error('News search error:', error);
-      setError('Could not load news results. Check the backend console and SERP_API_KEY configuration.');
+      const message = error instanceof Error ? error.message : 'Could not load news results.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -113,7 +118,7 @@ export default function NewsPortal() {
               <div className="space-y-1 text-sm mb-3">
                 <p><strong>Type:</strong> {issue.issue_type}</p>
                 <p><strong>Severity:</strong> <span className={`font-semibold ${issue.severity === 'high' ? 'text-red-600' : issue.severity === 'medium' ? 'text-orange-600' : 'text-green-600'}`}>{issue.severity}</span></p>
-                <p><strong>Affected:</strong> {issue.affected_population.toLocaleString()}</p>
+                {/* <p><strong>Affected:</strong> {issue.affected_population.toLocaleString()}</p> */}
               </div>
               <a
                 href={issue.source_url}
@@ -126,7 +131,7 @@ export default function NewsPortal() {
             </Card>
           ))}
         </div>
-      ) : !loading && query ? (
+      ) : !loading && query && !error ? (
         <p className="text-center text-gray-500">No results found</p>
       ) : null}
     </div>
