@@ -27,6 +27,10 @@ interface Prediction {
   urgency: "high" | "medium" | "low";
   confidence: "high" | "medium" | "low";
   timeframe: string;
+  resolution?: string;
+  overall_risk_assessment?: string;
+  resource_allocation?: Array<{ item: string; quantity: number | string }>;
+  needed_skills?: string[];
 }
 
 interface VolunteerBrief {
@@ -38,6 +42,7 @@ interface VolunteerBrief {
 
 interface Assignment {
   issue_summary: string;
+  type?: "database_sync" | "discovered_from_report";
   sector: string;
   location: string;
   urgency_score: number;
@@ -131,7 +136,10 @@ export function ReportChatbot() {
   const loadUploadedReports = async () => {
     setIsLoadingUploadedReports(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/documents`);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Must be logged in view reports");
+      
+      const res = await fetch(`${BACKEND_URL}/documents?ngo_user_id=${user.id}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || "Failed to load uploaded reports.");
@@ -165,7 +173,9 @@ export function ReportChatbot() {
     // Fetch initial context block count from persistent ChromaDB
     const checkStats = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/stats`);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const res = await fetch(`${BACKEND_URL}/stats?ngo_user_id=${user.id}`);
         if (res.ok) {
           const data = await res.json();
           setKnowledgeBaseCount(data.knowledgeBaseCount || 0);
@@ -175,6 +185,16 @@ export function ReportChatbot() {
       }
     };
     checkStats();
+
+    // Load persisted analysis from session storage or localStorage
+    const savedAnalysis = localStorage.getItem("last_smart_analysis");
+    if (savedAnalysis) {
+      try {
+        setAnalysis(JSON.parse(savedAnalysis));
+      } catch (e) {
+        console.error("Failed to parse saved analysis", e);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -286,11 +306,15 @@ export function ReportChatbot() {
     setIsProcessingFiles(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("You must be logged in to upload documents.");
+
       let chunksAdded = 0;
       for (const file of uploadedFiles) {
         toast.info(`Uploading ${file.name}...`);
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("ngo_user_id", user.id);
 
         const res = await fetch(`${BACKEND_URL}/upload`, {
           method: "POST",
@@ -375,11 +399,13 @@ export function ReportChatbot() {
       saveMessageToSession(currentSessionId, 'user', content);
 
       // Hit Flask Backend with History
+      const { data: { user } } = await supabase.auth.getUser();
       const res = await fetch(`${BACKEND_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           query: content,
+          ngo_user_id: user?.id,
           history: messages.filter(m => m.content !== "Hello! Select a chat from the sidebar or start a new one or just ask something below to start a new chat.") 
         }),
       });
@@ -423,6 +449,7 @@ export function ReportChatbot() {
       }
       const data = await res.json();
       setAnalysis(data.analysis);
+      localStorage.setItem("last_smart_analysis", JSON.stringify(data.analysis));
       toast.success("Smart analysis complete!");
     } catch (err: any) {
       toast.error(`Analysis error: ${err.message}`);
@@ -916,13 +943,55 @@ export function ReportChatbot() {
                               </span>
                             </div>
                             <p className="text-sm text-muted-foreground leading-relaxed">{pred.description}</p>
-                            <div className="flex items-center gap-3 flex-wrap">
+                            {pred.resolution && (
+                              <div className="bg-primary/5 p-3 rounded-md border border-primary/10 mt-2 mb-2">
+                                <h5 className="text-xs font-semibold text-primary mb-1">Recommended Resolution Strategy</h5>
+                                <p className="text-xs text-muted-foreground leading-relaxed">{pred.resolution}</p>
+                              </div>
+                            )}
+                            {pred.overall_risk_assessment && (
+                              <div className="bg-rose-50/80 p-3 rounded-md border border-rose-200 mt-2 mb-2">
+                                <h5 className="flex items-center gap-1.5 text-xs font-semibold text-rose-800 mb-1">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Risk Assessment
+                                </h5>
+                                <p className="text-xs text-rose-900 leading-relaxed">{pred.overall_risk_assessment}</p>
+                              </div>
+                            )}
+                            {pred.resource_allocation && pred.resource_allocation.length > 0 && (
+                              <div className="mt-2 mb-2">
+                                <h5 className="text-xs font-semibold text-foreground mb-1">Suggested Resource Allocation</h5>
+                                <ul className="space-y-1">
+                                  {pred.resource_allocation.map((alloc, idx) => (
+                                    <li key={idx} className="flex justify-between items-center text-xs bg-muted/40 p-1.5 rounded border border-border/50">
+                                      <span className="font-medium text-muted-foreground">{alloc.item}</span>
+                                      <span className="text-muted-foreground">Qty: {alloc.quantity}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-3 flex-wrap mt-2">
                               <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-md">{pred.sector}</span>
                               <span className="text-xs text-muted-foreground">⏳ {pred.timeframe}</span>
                               <span className={`text-xs px-2 py-0.5 rounded-md ${pred.confidence === 'high' ? 'text-green-700 bg-green-50' : pred.confidence === 'medium' ? 'text-amber-700 bg-amber-50' : 'text-slate-600 bg-slate-100'}`}>
                                 {pred.confidence} confidence
                               </span>
                             </div>
+                            
+                            {pred.needed_skills && pred.needed_skills.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-border">
+                                <h5 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                                  <Users className="w-3 h-3" /> Required Volunteer Skills
+                                </h5>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {pred.needed_skills.map((skill, idx) => (
+                                    <Badge key={idx} variant="outline" className="text-[10px] bg-background border-primary/20 text-primary px-2 py-0">
+                                      {skill}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -945,6 +1014,11 @@ export function ReportChatbot() {
                               <div>
                                 <p className="font-semibold text-foreground text-sm">{asgn.issue_summary}</p>
                                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                  {asgn.type === "discovered_from_report" ? (
+                                    <Badge className="bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200">New Finding from Report</Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="font-normal opacity-70">In Database</Badge>
+                                  )}
                                   <span className="text-xs bg-background border border-border px-2 py-0.5 rounded-md">{asgn.sector}</span>
                                   {asgn.location && <span className="text-xs text-muted-foreground">📍 {asgn.location}</span>}
                                 </div>

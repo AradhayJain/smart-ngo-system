@@ -10,6 +10,7 @@ const {
   processReport,
   assignVolunteers,
 } = require("./src/server/whatsappPipeline.cjs");
+const { runVertexAgent } = require("./src/services/vertexAgentService.cjs");
 
 const app = express();
 app.use(express.json());
@@ -22,6 +23,8 @@ app.use((req, res, next) => {
     'http://127.0.0.1:5173',
     'http://localhost:4173',
     'http://127.0.0.1:4173',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
   ]);
   const isLocalhostOrigin = typeof origin === 'string' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
@@ -493,6 +496,23 @@ app.post("/api/whatsapp/assign-volunteers", async (req, res) => {
       assignments: [],
       error: message,
     });
+  }
+});
+
+app.post("/api/run-vertex-agent", async (req, res) => {
+  const { rawInput, volunteers, ngo_user_id } = req.body;
+  
+  if (!rawInput) {
+    return res.status(400).json({ error: "rawInput is required" });
+  }
+
+  try {
+    console.log("[API] /api/run-vertex-agent called");
+    const state = await runVertexAgent(rawInput, volunteers || [], ngo_user_id, supabase);
+    return res.json(state);
+  } catch (error) {
+    console.error("[API] Vertex Agent error:", error);
+    return res.status(500).json({ error: error.message });
   }
 });
 

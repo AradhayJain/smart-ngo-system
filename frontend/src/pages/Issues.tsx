@@ -10,9 +10,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MapPin, Users } from "lucide-react";
+import { MapPin, Users, Brain, TrendingUp, Sparkles, ChevronRight, AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { formatDateTime, translateSector, translateStatus } from "@/lib/i18n";
+import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
+import { createNgoRequest } from "@/services/impactService";
 
 interface Issue {
   id: string;
@@ -25,6 +30,30 @@ interface Issue {
   assigned_volunteer_id: string | null;
   assignment_reason: string | null;
   created_at?: string | null;
+}
+
+interface ReadyVolunteer {
+  name: string;
+  skills: string[];
+  zone: string;
+  current_load?: number;
+  availability_hours?: number;
+}
+
+interface Prediction {
+  id: string;
+  title: string;
+  description: string;
+  sector: string;
+  urgency: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low";
+  timeframe: string;
+  resolution?: string;
+  needed_skills?: string[];
+  capacity_gap?: boolean;
+  missing_resources?: string[];
+  ready_volunteers?: ReadyVolunteer[];
+  created_at: string;
 }
 
 interface Volunteer {
@@ -122,6 +151,8 @@ export default function Issues() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState("priority");
   const [loading, setLoading] = useState(true);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [isFetchingPredictions, setIsFetchingPredictions] = useState(true);
   const { language, t } = useLanguage();
 
   useEffect(() => {
@@ -151,7 +182,19 @@ export default function Issues() {
       const dbIssues = (issuesRes.data || []) as Issue[];
       setIssues(dbIssues.length > 0 ? dbIssues : []);
       setVolunteers((volRes.data || []) as Volunteer[]);
+      
       setLoading(false);
+
+      // Fetch AI Predictions
+      setIsFetchingPredictions(true);
+      const { data: predData } = await supabase
+        .from("smart_predictions")
+        .select("*")
+        .eq("ngo_user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(3);
+      setPredictions((predData || []) as Prediction[]);
+      setIsFetchingPredictions(false);
     };
     fetchData();
   }, []);
@@ -166,7 +209,31 @@ export default function Issues() {
     ]);
     setIssues((issuesRes.data || []) as Issue[]);
     setVolunteers((volRes.data || []) as Volunteer[]);
-    setLoading(false);
+    
+    setIsFetchingPredictions(false);
+  };
+
+  const handlePostToCommunity = async (prediction: Prediction) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Please sign in first.");
+
+      await createNgoRequest({
+        title: `Urgent: ${prediction.title}`,
+        description: `Based on AI Forecast: ${prediction.description}\n\nMissing Requirements: ${prediction.missing_resources?.join(", ") || "Skills needed for prevention."}`,
+        category: prediction.sector,
+        urgency: prediction.urgency === "high" ? "critical" : prediction.urgency === "medium" ? "high" : "medium",
+        location: "Field / Multiple Locations",
+        volunteersNeeded: 5,
+        fundingAmount: 0,
+        skillsNeeded: prediction.needed_skills?.join(", ") || prediction.sector,
+        contactMethod: "Platform Messaging",
+      });
+
+      toast.success("Community request posted successfully!");
+    } catch (error: any) {
+      toast.error("Failed to post request: " + error.message);
+    }
   };
 
   const sectors = [...new Set(issues.map((i) => i.sector).filter(Boolean))] as string[];
@@ -188,6 +255,190 @@ export default function Issues() {
         <h1 className="text-2xl font-bold">{t("issues.title")}</h1>
         <p className="text-muted-foreground text-sm mt-1">{t("issues.found", { count: filtered.length })}</p>
       </div>
+
+      {/* AI Predictive Insights Section */}
+      {(predictions.length > 0 || isFetchingPredictions) && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Brain size={18} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">AI Strategic Forecast</h2>
+                <p className="text-xs text-muted-foreground">Predictive analysis based on current field reports and history</p>
+              </div>
+            </div>
+            <Link to="/insights">
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground gap-1">
+                Full Analysis <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          </div>
+
+          {/* Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
+            <AnimatePresence mode="popLayout">
+              {isFetchingPredictions ? (
+                Array(3).fill(0).map((_, i) => (
+                  <motion.div
+                    key={`skeleton-${i}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="p-5 space-y-3"
+                  >
+                    <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+                    <div className="h-5 w-4/5 bg-muted animate-pulse rounded" />
+                    <div className="h-3 w-full bg-muted animate-pulse rounded" />
+                    <div className="h-3 w-3/4 bg-muted animate-pulse rounded" />
+                  </motion.div>
+                ))
+              ) : (
+                predictions.map((pred, idx) => {
+                  const urgencyConfig = {
+                    high:   { label: "High Risk",   badge: "bg-destructive/10 text-destructive border-destructive/20",     dot: "bg-destructive"  },
+                    medium: { label: "Medium Risk",  badge: "bg-amber-500/10 text-amber-700 border-amber-300 dark:text-amber-400 dark:border-amber-600", dot: "bg-amber-500"   },
+                    low:    { label: "Low Risk",     badge: "bg-emerald-500/10 text-emerald-700 border-emerald-300 dark:text-emerald-400 dark:border-emerald-600", dot: "bg-emerald-500" },
+                  }[pred.urgency] ?? { label: pred.urgency, badge: "bg-muted text-muted-foreground border-border", dot: "bg-muted-foreground" };
+
+                  return (
+                    <motion.div
+                      key={pred.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: idx * 0.08 }}
+                      className="group flex flex-col justify-between p-5 hover:bg-muted/20 transition-colors"
+                    >
+                      <div className="space-y-3">
+                        {/* Top row: urgency + sector */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${urgencyConfig.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${urgencyConfig.dot}`} />
+                            {urgencyConfig.label}
+                          </span>
+                          <span className="text-[11px] font-medium text-muted-foreground capitalize">{pred.sector}</span>
+                        </div>
+
+                        {/* Title */}
+                        <h4 className="text-sm font-semibold text-foreground leading-snug">{pred.title}</h4>
+
+                        {/* Description */}
+                        {pred.description && (
+                          <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{pred.description}</p>
+                        )}
+
+                        {/* Capacity Gap Alert */}
+                        {pred.capacity_gap && (
+                          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/8 border border-amber-500/20">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">Resource Gap Detected</p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                                {pred.missing_resources?.[0] ?? "Insufficient volunteers for this risk."}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer: gap OR ready volunteers */}
+                      <div className="mt-4 pt-3 border-t border-border space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                            <TrendingUp className="w-3.5 h-3.5" />
+                            <span className="text-[11px] font-medium">{pred.timeframe || "Next 48–72h"}</span>
+                          </div>
+
+                          {pred.capacity_gap ? (
+                            <Button
+                              onClick={() => handlePostToCommunity(pred)}
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-[11px] font-semibold border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30"
+                            >
+                              Post for Help
+                            </Button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              Covered
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Ready volunteers list */}
+                        {!pred.capacity_gap && pred.ready_volunteers && pred.ready_volunteers.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Available to Deploy</p>
+                            {pred.ready_volunteers.slice(0, 3).map((vol, vi) => (
+                              <div key={vi} className="flex items-center justify-between rounded-md bg-emerald-500/5 border border-emerald-500/15 px-2.5 py-1.5">
+                                <div className="flex items-center gap-2">
+                                  <Users className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span className="text-[11px] font-semibold text-foreground">{vol.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-muted-foreground">{vol.zone}</span>
+                                  {vol.current_load !== undefined && (
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                      vol.current_load === 0 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400" :
+                                      "bg-muted text-muted-foreground"
+                                    }`}>
+                                      {vol.current_load === 0 ? "Free" : `${vol.current_load} active`}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Gap details */}
+                        {pred.capacity_gap && pred.missing_resources && pred.missing_resources.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Gaps to Fill</p>
+                            {pred.missing_resources.map((gap, gi) => (
+                              <p key={gi} className="text-[11px] text-muted-foreground leading-tight flex items-start gap-1.5">
+                                <span className="w-1 h-1 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                                {gap}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Analysis Call to Action if empty */}
+      {!isFetchingPredictions && predictions.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background">
+              <Brain className="w-4 h-4 text-muted-foreground" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">No predictive insights yet</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Run Smart Analysis to generate AI-driven forecasts for your current issues.</p>
+            </div>
+          </div>
+          <Link to="/insights">
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0">
+              <Sparkles className="w-3.5 h-3.5" /> Run Analysis
+            </Button>
+          </Link>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">
@@ -223,6 +474,8 @@ export default function Issues() {
           </SelectContent>
         </Select>
       </div>
+
+
 
       {/* Grid */}
       {loading ? (
